@@ -1,0 +1,19 @@
+{
+  "name": "sites",
+  "displayName": "sites",
+  "version": "2.0.0",
+  "description": "Hosting, records and files for agent-built sites on cookiejar.lol: one key per person, one site per project. Teaches the agent to provision a site, deploy it (Next.js server or static), store JSON records and files, set env and its own domain.",
+  "author": {
+    "name": "rkz211"
+  },
+  "homepage": "https://cookiejar.lol/",
+  "keywords": [
+    "hosting",
+    "storage",
+    "database",
+    "files",
+    "uploads",
+    "nextjs",
+    "domains"
+  ]
+}

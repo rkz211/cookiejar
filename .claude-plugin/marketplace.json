@@ -1,0 +1,16 @@
+{
+  "name": "cookiejar",
+  "owner": {
+    "name": "rkz211"
+  },
+  "metadata": {
+    "description": "Skills for building sites on cookiejar.lol (hosting + records + files)."
+  },
+  "plugins": [
+    {
+      "name": "sites",
+      "source": "./",
+      "description": "Build, deploy and store data for a site on cookiejar.lol instead of provisioning a host, a database or a blob store."
+    }
+  ]
+}
