@@ -108,7 +108,13 @@ printf '%s' "$R" | node -pe 'const j=JSON.parse(require("fs").readFileSync(0,"ut
 A server deploy takes about three minutes the first time (the build), a static one about ninety seconds. The
 site is then at `https://<siteId>.cookiejar.lol/`; the first time, allow a few more minutes for its
 certificate (`GET /edge` shows `live: true` when the domain is active). Re-deploy by repeating a) to c).
-Rollback a server site: `POST /deploy/{deployId}/activate` with an earlier live deploy.
+**Versions, rollback, clone.** The 5 most recent successful deploys keep their artifacts (`GET /deploys`
+shows `artifacts: retained` and which one is `active`). Roll back or forward with
+`POST /deploy/{deployId}/activate` (static and server alike; seconds, no rebuild). Clone a site back to a
+machine with `GET /source` (the live deploy) or `GET /deploy/{deployId}/source`: the reply's `url` is a
+short-lived download of the project zip exactly as it was uploaded; unzip it, `npm install`, and you have
+the source. Older deploys are `pruned` and can be neither activated nor cloned. Rename a site with
+`PATCH /sites/{siteId} {"name": "..."}` (key) or `PATCH /me` (key + `X-Site`); nothing else changes.
 
 **Environment variables for the site's server**: `PUT /env` (key + `X-Site`) with `{"KEY":"value"}` (≤ 3.5 KB total), applied at
 the next deploy. `HUB_URL` and `HUB_TOKEN` are set for you: the deployed server authenticates to sites with
