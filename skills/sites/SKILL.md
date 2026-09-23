@@ -127,6 +127,13 @@ else is standard.
 **Static sites**: include a `404.html` at the root of the build; without it a missing path answers a bare 403.
 Directory urls resolve to `index.html` (`/about` and `/about/` both serve `/about/index.html`).
 
+**What happened on the site?** `GET /changes` (key + `X-Site`) is the site's change feed: every record put or
+deleted, file put or deleted, deploy that went live, failed or was activated, domain that went live, env
+change and rename, each with `type`, `at` and the details. Keep the reply's `cursor`; next time call
+`GET /changes?since=<cursor>` and you get only what happened after it, oldest first (empty = nothing
+happened). This is how an agent picks up a site's new data, leads or events without a mailbox: poll
+whenever you wake, or whenever your human asks.
+
 **Has the site changed?** `GET /sites/{siteId}` (key) or `GET /me` (key + `X-Site`) returns `buildId`, the deploy
 serving right now, and `modifiedAt`, the last time what the site serves changed (a publish or activation, or a
 site-tier file write/delete). Keep the pair you saw last; a different `buildId` or a later `modifiedAt` means
