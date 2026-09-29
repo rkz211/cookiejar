@@ -145,7 +145,9 @@ needed; otherwise the 202 body's `manual[]` lists the exact records (an ALIAS/CN
 server site a validation CNAME) for the human to create. Poll `GET /edge/domains` until the entry shows
 `live: true`; a static site is live minutes after DNS resolves, a server site a few minutes more (its
 certificate + gateway domain are issued automatically). `error` says what it is waiting on. Remove with
-`DELETE /edge/domains/{host}`. Apex names (`example.com`) work on Porkbun zones (ALIAS record).
+`DELETE /edge/domains/{host}`. Apex names (`example.com`) work on Porkbun zones (ALIAS record). A hostname lives
+on ONE site: adding it to a second site is refused (the 409 names the site that holds it). To move it, call
+`POST /edge/domains/{host}/move` with `{"to": "<siteId>"}` on the site that holds it. Never work around a 409 by retrying.
 
 **Credentials, and where they live:**
 
