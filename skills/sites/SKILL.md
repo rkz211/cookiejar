@@ -134,6 +134,25 @@ change and rename, each with `type`, `at` and the details. Keep the reply's `cur
 happened). This is how an agent picks up a site's new data, leads or events without a mailbox: poll
 whenever you wake, or whenever your human asks.
 
+**Secrets and keys (a secure store).** Put API keys and tokens in CJ's secret store, not in `PUT /env`:
+`PUT /secrets {"STRIPE_KEY": "sk_live_..."}` (key + `X-Site`). A managed secret is encrypted under CJ's KMS key with
+the site id as context; no key, session, portal page or admin route can ever read it back, and every read is
+logged in the site's change feed (`secret.reveal`). Only the running site reads values, with its own server
+token, which a site hosted on CJ already has as `HUB_TOKEN`: `GET /secrets/reveal` -> `{values: {STRIPE_KEY:
+...}}`. Fetch once at startup and keep it in memory; never write it to a file or a log. The copy-paste client
+below has `hub.secrets()` for this. `GET /secrets` lists names only. Delete with `DELETE /secrets/{NAME}` or
+`PUT /secrets {"NAME": null}`. Rotate by setting the name again (the version increments).
+
+SEALED secrets, for anything that does NOT run on CJ (a dot's bridge, a worker on your own machine): encrypt
+the value yourself with a key only you hold, store the ciphertext as `PUT /secrets {"NAME": {"sealed":
+"<base64 ciphertext>"}}`, and open it where you run after `GET /secrets/reveal` returns it under `sealed`. CJ
+never holds the key and cannot read it. Node example: `crypto.createCipheriv('aes-256-gcm', key, iv)`, store
+base64(iv + tag + ciphertext); keep `key` out of CJ.
+
+**A private site.** `PUT /password {"password": "..."}` (key + `X-Site`) puts a password page on every host of the
+site: one box, no username; the visitor's browser remembers it for 30 days. `DELETE /password` opens it again.
+Your own requests can send HTTP Basic with any username and that password.
+
 **Has the site changed?** `GET /sites/{siteId}` (key) or `GET /me` (key + `X-Site`) returns `buildId`, the deploy
 serving right now, and `modifiedAt`, the last time what the site serves changed (a publish or activation, or a
 site-tier file write/delete). Keep the pair you saw last; a different `buildId` or a later `modifiedAt` means
@@ -195,6 +214,8 @@ const enc = encodeURIComponent;
 export const hub = {
   /** Which site this token is: {siteId, name, calls, publicFilesUrl}. */
   me: () => call<{ siteId: string; name: string; calls: number; publicFilesUrl: string }>('GET', '/me'),
+  /** The site's secrets (managed values decrypted; sealed ones as stored). Server-side only; call once at startup, keep in memory. */
+  secrets: (names?: string[]) => call<{ values: Record<string, string>; sealed: Record<string, string> }>('GET', '/secrets/reveal', undefined, { names: names?.join(',') }),
 
   // ---- records --------------------------------------------------------------
   get: <T = unknown>(collection: string, key: string) =>
