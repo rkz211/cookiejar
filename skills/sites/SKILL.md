@@ -1,10 +1,10 @@
 ---
 name: sites
-description: Hosting, JSON records (a table API) and files (uploads, public CDN urls, private downloads) for the sites you are building, from sites on cookiejar.lol: one key per person, one site per project. Use when a site needs to save or read data, take uploads, serve images or documents, or when you would otherwise reach for a database, Postgres, Supabase, KV, Blob storage, or an ORM. sites is also the host: it builds and serves the project from its source (Next.js server-rendered or static). No Vercel, no other host.
+description: Hosting, secrets, custom domains, deployment recovery, JSON records (a table API) and files (uploads, public CDN urls, private downloads) for the sites you are building, from sites on cookiejar.lol: one key per person, one site per project. Use when a site needs to save or read data, take uploads, serve images or documents, or when you would otherwise reach for a database, Postgres, Supabase, KV, Blob storage, or an ORM. sites is also the host: it builds and serves the project from its source (Next.js server-rendered or static). No Vercel, no other host.
 metadata:
   priority: 8
   docs:
-    - "https://cookiejar.lol/contract/README.md"
+    - "https://cookiejar.lol/agent/"
   pathPatterns:
     - 'lib/hub.*'
     - 'src/lib/hub.*'
@@ -23,6 +23,10 @@ metadata:
     - "mongoose"
 retrieval:
   aliases:
+    - hosting
+    - secrets
+    - custom domains
+    - rollback
     - database
     - table
     - records
@@ -42,148 +46,401 @@ retrieval:
     - HUB_TOKEN
 ---
 
-# sites
+<!-- Generated from docs/agent.md; edit the source and run npm run docs:generate. -->
 
-You are wiring a site into **sites** (the hub): one backend that already exists, with a JSON records API, a
-files API and hosting. You do **not** provision a database, a bucket, a host or an ORM. Your key plus a site id
-does everything from your side; the deployed server gets its own token.
+# Cookiejar: complete customer-agent manual
 
-## Decide
+Cookiejar (“sites”) hosts the projects you build and gives each one JSON records, file storage,
+deployments, custom domains and secrets. One account key per person, one site per project.
+The canonical manual is [cookiejar.lol/agent/](https://cookiejar.lol/agent/).
+The installable [sites skill](https://raw.githubusercontent.com/rkz211/cookiejar/main/skills/sites/SKILL.md)
+is generated from this same manual. You do not need a second reference to build or operate a site.
 
-| The site needs | Use |
+## Step 1 — Confirm setup and locate the key
+
+For a new user, ask together: “Cookiejar is a closed-beta backend with records, files and hosting
+for sites I build. Do you want me to install its skill and get set up? Where is your key file
+(usually `sites-key-<name>.txt` in Downloads)?” Wait for their answers before setup or building.
+If they already authorized setup, do not ask again. If they decline, stop. If they have no key,
+ask them to request one from their Cookiejar contact; do not invent credentials or another backend.
+
+### Joining the beta without a key
+
+With the human's request to sign up, `POST /waitlist` accepts `{name,email,sitesPerMonth?,features?,agent?}`
+without authentication and returns 201 with `{ok,onList,already,message}`. The public API base is
+`https://lnh25l18k1.execute-api.us-west-2.amazonaws.com`. Name and valid email are required; name is
+clipped to 120 characters, email to 254, features to 2000 and agent to 60. `sitesPerMonth` accepts
+`1-2`, `3-10`, `11-50`, `50+` or `exploring`. A repeat email updates answers and preserves invitation
+status; blank optional answers preserve earlier values. The limit is 20 requests per source IP
+per hour (429). Joining the list does not create a key or authorize a build.
+
+## Step 2 — Configure your environment
+
+The key file contains `HUB_URL` (the API base URL) and `HUB_KEY`; lines beginning with `#` are comments.
+Use its values, not the marketing site's URL as an API endpoint. Put them in your own persistent
+agent/shell environment with the user's setup authorization. Never echo the key or copy it into
+project files, `.env`, source archives, commits, browser code or logs. Keep the original key file
+somewhere safe outside projects. If you have no persistent environment, read it at the start of
+each session and retain the values only for the session. Never ask the human to paste credentials
+into public messages. Shell examples below use Bash, curl, Node.js and zip.
+
+```bash
+test -n "$HUB_URL" && test -n "$HUB_KEY" && echo 'Environment ready'
+```
+
+`HUB_URL` has no trailing slash in these examples. Your account key is for agent operations.
+Cookiejar supplies `HUB_URL` and a per-deployment `HUB_TOKEN` to the deployed server automatically.
+`.sites/site` holds only a site id and may be committed. For local server development, set
+`HUB_SITE=$(cat .sites/site)` in your process environment alongside your key; the client below
+uses `HUB_KEY` plus `X-Site` locally. Secret reveal requires a site token and therefore does not
+work with that local account-key mode.
+
+## Step 3 — Install once
+
+Claude Code:
+
+```bash
+claude plugin marketplace add rkz211/cookiejar
+claude plugin install sites@cookiejar
+```
+
+Other agents can fetch the [generated SKILL.md](https://raw.githubusercontent.com/rkz211/cookiejar/main/skills/sites/SKILL.md)
+and follow it. Save that URL and the key-file location in agent memory if available, never the key.
+Tell the human setup is complete; restart the agent if needed to pick up environment changes.
+An already installed agent should proceed to the requested project rather than repeat onboarding.
+
+## Step 4 — Choose storage and create or resume a site
+
+| Need | Use |
 |---|---|
-| Save/read structured data (posts, signups, settings, orders, comments) | **Records**: `/c/{collection}/{key}` |
-| Images, PDFs, video, downloads that pages link to | **Public files**: `/files/public` → stable CDN url |
-| Uploads only the owner should see (reports, invoices, raw form attachments) | **Private files**: `/files/private` → 1-hour presigned url per read |
-| Relational joins, full-text search, transactions across many rows | Not sites. Say so and stop; ask before adding a database. |
+| Structured data: posts, signups, settings, orders | Records under `/c/{collection}/{key}` |
+| Images, PDFs, downloads a page links to | Public files, stable CDN URLs |
+| Reports, invoices, private attachments | Private files, fresh signed download per read |
+| Next.js server code or a static build | Cookiejar hosting |
+| API credentials used by server code | Managed secrets |
+| Ciphertext encrypted with a key you hold outside Cookiejar | Sealed secrets |
 
-Records are any JSON up to 350 KB. Collections and keys are plain identifiers. There is no schema; keep
-a stable shape per collection and version it in a field if it changes.
+Records are a simple table API. There are no relational joins, full-text search or multi-record
+transactions. If those are essential, explain the requirement and ask before introducing another
+backend. For a Cookiejar project, do not silently add a database, ORM, blob provider or another host.
 
-## Provision and host (you do it yourself; sites IS the host)
-
-There is no Vercel and no other host. A site's files are served by the sites edge; a site's data lives in
-the sites API. Your own environment carries `HUB_URL` and `HUB_KEY`. Check first:
-
-```bash
-test -n "$HUB_URL" && test -n "$HUB_KEY" && echo ok
-```
-
-If either is missing, stop and ask for the key file. Do not invent a fallback store or a fallback host.
-
-**1. Create the site.** One site per project. Name it after the project. Your key is the umbrella over every
-site it creates: with the header `X-Site: <siteId>` it can do anything on that site. So a project holds only its
-**site id**, which is not a secret; no token ever lands in the project.
+Check `GET /sites` and an existing `.sites/site` before creating anything. Reuse the site's id for
+that project. Account routes use the key alone; site-scoped routes use the key plus `X-Site`.
+Do not send `X-Site` to account routes, because it selects the site-scoped router.
 
 ```bash
-SITE=$(curl -sf -X POST "$HUB_URL/sites"   -H "Authorization: Bearer $HUB_KEY" -H "content-type: application/json"   -d "{\"name\":\"$(basename "$PWD")\"}")
-mkdir -p .sites && printf '%s' "$SITE" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).siteId' > .sites/site
-echo "site: $(cat .sites/site) -> $(printf '%s' "$SITE" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).siteUrl')"
+# From the project root; do this only if the project has no site yet.
+set -e
+HUB_URL=${HUB_URL%/}
+BODY=$(node -e 'process.stdout.write(JSON.stringify({name:require("node:path").basename(process.cwd())}))')
+SITE=$(curl --fail-with-body -sS -X POST "$HUB_URL/sites" \
+  -H "Authorization: Bearer $HUB_KEY" -H 'content-type: application/json' -d "$BODY")
+mkdir -p .sites
+printf '%s' "$SITE" | node -pe 'JSON.parse(require("node:fs").readFileSync(0,"utf8")).siteId' > .sites/site
+unset SITE # create also returns a manual site token; do not print or persist it
+S=$(cat .sites/site)
+H=(-H "Authorization: Bearer $HUB_KEY" -H "X-Site: $S")
+curl --fail-with-body -sS "$HUB_URL/me" "${H[@]}"
 ```
 
-(The response also carries a per-site `token`; you do not need it. Ignore it, never store it.)
+All API paths below are relative to `HUB_URL`. Never expose a key or a site token to visitors.
+Your application must authenticate/authorize its own users before server-side record operations,
+private downloads or presigned uploads. A site's token can access the whole site; it is not a
+per-visitor permission system.
 
-From here every call is `-H "Authorization: Bearer $HUB_KEY" -H "X-Site: $(cat .sites/site)"`. A project that
-already has `.sites/site` does not get a second site.
+## Account and site operations
 
-**2. Deploy it: sites builds and hosts the project from its source.** Both kinds go through the same
-three calls. `server` (default) is any Next.js app: server actions, route handlers, server components all
-work. `static` is a project whose `npm run build` writes a folder of files (pass `outputDir`, default `out`).
-
-```bash
-S=$(cat .sites/site); H=(-H "Authorization: Bearer $HUB_KEY" -H "X-Site: $S")
-# a) a deploy + a place to put the source. Zip the project root (package.json at the top; skip node_modules, .next, .git, .sites)
-D=$(curl -sf -X POST "$HUB_URL/deploy" "${H[@]}" -H "content-type: application/json" -d '{"kind":"server"}')
-DID=$(printf '%s' "$D" | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).deployId')
-UP=$(printf '%s' "$D"  | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8")).source.uploadUrl')
-zip -qr /tmp/source.zip . -x 'node_modules/*' '.next/*' '.open-next/*' '.git/*' '.sites/*' 'out/*'
-curl -sf -o /dev/null -X PUT "$UP" -H "content-type: application/zip" --data-binary @/tmp/source.zip
-# b) build + place
-curl -sf -X POST "$HUB_URL/deploy/$DID/start" "${H[@]}" >/dev/null
-# c) wait: created -> building -> placing -> live (or failed, with the build log tail in the response)
-until R=$(curl -sf "$HUB_URL/deploy/$DID" "${H[@]}"); printf '%s' "$R" | grep -qE '"status":"(live|failed)"'; do sleep 15; done
-printf '%s' "$R" | node -pe 'const j=JSON.parse(require("fs").readFileSync(0,"utf8")); j.status+" "+(j.url||"")+(j.error?" "+j.error:"")+(j.status==="failed"?"\n"+j.log.join("\n"):"")'
-```
-
-A server deploy takes about three minutes the first time (the build), a static one about ninety seconds. The
-site is then at `https://<siteId>.cookiejar.lol/`; the first time, allow a few more minutes for its
-certificate (`GET /edge` shows `live: true` when the domain is active). Re-deploy by repeating a) to c).
-**Versions, rollback, clone.** The 5 most recent successful deploys keep their artifacts (`GET /deploys`
-shows `artifacts: retained` and which one is `active`). Roll back or forward with
-`POST /deploy/{deployId}/activate` (static and server alike; seconds, no rebuild). Clone a site back to a
-machine with `GET /source` (the live deploy) or `GET /deploy/{deployId}/source`: the reply's `url` is a
-short-lived download of the project zip exactly as it was uploaded; unzip it, `npm install`, and you have
-the source. Older deploys are `pruned` and can be neither activated nor cloned. Rename a site with
-`PATCH /sites/{siteId} {"name": "..."}` (key) or `PATCH /me` (key + `X-Site`); nothing else changes.
-
-**Environment variables for the site's server**: `PUT /env` (key + `X-Site`) with `{"KEY":"value"}` (≤ 3.5 KB total), applied at
-the next deploy. `HUB_URL` and `HUB_TOKEN` are set for you: the deployed server authenticates to sites with
-its own server token, so the client below works unchanged in production.
-
-**Next.js on sites**: set `images: { unoptimized: true }` in `next.config` (no image optimizer), and do not
-rely on ISR/revalidation (there is no cache or queue; pages render on request or at build). Everything
-else is standard.
-
-**Static sites**: include a `404.html` at the root of the build; without it a missing path answers a bare 403.
-Directory urls resolve to `index.html` (`/about` and `/about/` both serve `/about/index.html`).
-
-**What happened on the site?** `GET /changes` (key + `X-Site`) is the site's change feed: every record put or
-deleted, file put or deleted, deploy that went live, failed or was activated, domain that went live, env
-change and rename, each with `type`, `at` and the details. Keep the reply's `cursor`; next time call
-`GET /changes?since=<cursor>` and you get only what happened after it, oldest first (empty = nothing
-happened). This is how an agent picks up a site's new data, leads or events without a mailbox: poll
-whenever you wake, or whenever your human asks.
-
-**Secrets and keys (a secure store).** Put API keys and tokens in CJ's secret store, not in `PUT /env`:
-`PUT /secrets {"STRIPE_KEY": "sk_live_..."}` (key + `X-Site`). A managed secret is encrypted under CJ's KMS key with
-the site id as context; no key, session, portal page or admin route can ever read it back, and every read is
-logged in the site's change feed (`secret.reveal`). Only the running site reads values, with its own server
-token, which a site hosted on CJ already has as `HUB_TOKEN`: `GET /secrets/reveal` -> `{values: {STRIPE_KEY:
-...}}`. Fetch once at startup and keep it in memory; never write it to a file or a log. The copy-paste client
-below has `hub.secrets()` for this. `GET /secrets` lists names only. Delete with `DELETE /secrets/{NAME}` or
-`PUT /secrets {"NAME": null}`. Rotate by setting the name again (the version increments).
-
-SEALED secrets, for anything that does NOT run on CJ (a dot's bridge, a worker on your own machine): encrypt
-the value yourself with a key only you hold, store the ciphertext as `PUT /secrets {"NAME": {"sealed":
-"<base64 ciphertext>"}}`, and open it where you run after `GET /secrets/reveal` returns it under `sealed`. CJ
-never holds the key and cannot read it. Node example: `crypto.createCipheriv('aes-256-gcm', key, iv)`, store
-base64(iv + tag + ciphertext); keep `key` out of CJ.
-
-**A private site.** `PUT /password {"password": "..."}` (key + `X-Site`) puts a password page on every host of the
-site: one box, no username; the visitor's browser remembers it for 30 days. `DELETE /password` opens it again.
-Your own requests can send HTTP Basic with any username and that password.
-
-**Has the site changed?** `GET /sites/{siteId}` (key) or `GET /me` (key + `X-Site`) returns `buildId`, the deploy
-serving right now, and `modifiedAt`, the last time what the site serves changed (a publish or activation, or a
-site-tier file write/delete). Keep the pair you saw last; a different `buildId` or a later `modifiedAt` means
-something changed. `GET /deploy/{buildId}` has that build's log and status.
-
-**A custom domain** (static or Next.js alike): `POST /edge/domains` with `{"domain":"www.example.com"}` (key +
-`X-Site`). If the zone is in the hub's Porkbun account the DNS record is written for you and nothing else is
-needed; otherwise the 202 body's `manual[]` lists the exact records (an ALIAS/CNAME to the edge, and for a
-server site a validation CNAME) for the human to create. Poll `GET /edge/domains` until the entry shows
-`live: true`; a static site is live minutes after DNS resolves, a server site a few minutes more (its
-certificate + gateway domain are issued automatically). `error` says what it is waiting on. Remove with
-`DELETE /edge/domains/{host}`. Apex names (`example.com`) work on Porkbun zones (ALIAS record). A hostname lives
-on ONE site: adding it to a second site is refused (the 409 names the site that holds it). To move it, call
-`POST /edge/domains/{host}/move` with `{"to": "<siteId>"}` on the site that holds it. Never work around a 409 by retrying.
-
-**Credentials, and where they live:**
-
-| Credential | Lives in | Never goes to |
+| Method | Path | Request and result |
 |---|---|---|
-| `HUB_KEY` (your key) | your own shell environment | any project, any file, any commit, any browser |
-| `.sites/site` (the site id) | the project; not a secret, may be committed | — |
-| the site's server token | the deployed server's environment as `HUB_TOKEN`, set by sites at deploy | anywhere else; you never see it |
+| GET | `/` | Public service discovery; use this manual for customer workflows |
+| GET | `/key` | Account metadata for the key/session |
+| POST | `/sites` | `{ "name": "My project" }` → 201 with `siteId`, `token`, `siteUrl`; ignore the token for the account-key workflow |
+| GET | `/sites` | `{sites:[...]}` owned by this account |
+| GET | `/sites/{siteId}` | Site details, URLs, domains, `buildId`, `modifiedAt`, disable/removal state |
+| PATCH | `/sites/{siteId}` | `{ "name": "New name" }`; changes the name only |
+| POST | `/sites/{siteId}/rotate` | Replaces the manual site token and re-enables a disabled site; new token returned once |
+| DELETE | `/sites/{siteId}` | 202; disables access immediately and queues edge removal, retains data |
+| GET | `/me` | Site details plus `publicFilesUrl` and `siteUrl` |
+| PATCH | `/me` | `{ "name": "New name" }`, site-scoped rename |
+
+After disabling, poll `GET /sites/{siteId}` with the account key until `edgeRemoval` is `complete`.
+Rotation does not resume cancelled builds. Deployed server versions have separate retained tokens
+for rollback and in-flight requests; rotating a manual token does not revoke those versions.
+Disable the site to refuse every site token. Report a leaked account key to the Cookiejar operator
+for replacement; do not print the credential in the report.
+
+For changes to what is served, compare `buildId` (the active deployment id) and `modifiedAt`.
+Record writes do not imply a new build. Fetch `GET /deploy/{buildId}` for deployment details.
+
+The human portal is [cookiejar.lol/portal/](https://cookiejar.lol/portal/).
+Its sign-in protocol is `POST /login/challenge {accountId}` → `{nonce}`, then
+`POST /login {accountId, nonce, proof}` → `{session}`. The proof is
+`hex(HMAC_SHA256(hex(SHA256(key)), nonce))`. Sessions last 12 hours and follow account-key routing,
+including `X-Site`; key rotation ends them. Agents normally use their provided key directly.
+
+## Records: shapes, limits and pagination
+
+| Method | Path | Result |
+|---|---|---|
+| GET | `/c` | `{collections:[{collection,createdAt,updatedAt}]}` |
+| GET | `/c/{collection}` | `{collection,items:[record],cursor}` |
+| POST | `/c/{collection}` | Body is the JSON data; 201 with a generated time-sortable key |
+| DELETE | `/c/{collection}` | Deletes all records and collection metadata; `{deleted: number}` |
+| GET | `/c/{collection}/{key}` | One record, or 404 |
+| PUT | `/c/{collection}/{key}` | Creates or replaces the complete JSON data; returns the record |
+| DELETE | `/c/{collection}/{key}` | `{collection,key,deleted:true}`; 404 if absent |
+
+A record is `{collection,key,data,createdAt,updatedAt}`. The body can be any JSON, including an
+array or scalar, up to **358400 bytes (350 KiB)** of UTF-8 serialized JSON. Put larger content in
+files and store a path or URL in a record. A PUT replaces data, not a field-level merge; it keeps
+`createdAt` and updates `updatedAt`. There is no schema; keep shapes stable and version them when needed.
+
+Collections match `[A-Za-z0-9_-]{1,64}`; keys match `[A-Za-z0-9_.:@~-]{1,256}`.
+Use `POST` for generated keys or slugify user input. List query parameters are `prefix`, `limit`
+(default 50, 1–100), `cursor` and `order=asc` or `order=desc`. Ordering is by key, not by a data field.
+Pass the opaque `cursor` back unchanged, URL-encoded, until it is null. Prefix keys such as
+`user:123:...` or `2026-10-09:...` to query groups. Collection deletion is not a transaction.
+
+## Files: upload, read, list and delete
+
+Here `{tier}` means `public`, `private` or `site`.
+
+| Method | Path | Request and result |
+|---|---|---|
+| POST | `/files/{tier}` | `{path,contentType?,cacheControl?}` → `{access,path,method,uploadUrl,headers,expiresIn,url}` |
+| GET | `/files/{tier}` | `{access,prefix,files:[{path,size,lastModified,url}],cursor}` |
+| GET | `/files/{tier}/{path}` | `{access,path,url,expiresIn,size,contentType,lastModified}`; 404 if absent |
+| DELETE | `/files/{tier}/{path}` | `{access,path,deleted:true}`; deleting an absent file is harmless |
+
+Upload is two requests: ask for an upload URL, then PUT the raw bytes to it using exactly the
+returned `headers`. Upload URLs expire after **900 seconds**. Do not send your Cookiejar bearer
+token to that storage URL. Default content type is `application/octet-stream`. A public URL is
+returned when the URL is minted, but the file exists only after the PUT succeeds. Private upload
+and listing URLs are null; request file info for a fresh private download URL (**3600 seconds**).
+`GET /files/{tier}/{path}?redirect=1` redirects with HTTP 302. Store the private path, never a signed URL.
+
+Paths are 1–512 characters, relative, slash-separated, with nonempty segments containing only
+letters, digits, `. _ ( ) ! * ' -`. No `.` or `..` segment or leading slash. File list queries use
+`prefix`, `limit` (default 100, 1–1000) and opaque `cursor`; null means the end. File info sizes are bytes.
+The file-signing handler imposes no application byte cap and offers no multipart API: uploads are
+single storage PUTs. Do not confuse record limits or static deployment artifact limits with file uploads.
+Apply your application's own upload size/type and access policy before handing URLs to browsers.
+
+Public files are separate from the hosted web root and cached for five minutes by default.
+Use content-hashed paths plus `cacheControl: "public, max-age=31536000, immutable"` for immutable assets.
+The `site` tier serves the static web root. Once a managed static release is active, reads follow
+that release and direct site-tier uploads/deletes return **409**; create another deployment.
+Public/private file operations remain available.
+
+## Deploy source and host it
+
+| Method | Path | Request and result |
+|---|---|---|
+| POST | `/deploy` | `{kind:"server"}` (default) or `{kind:"static",outputDir:"dist"}` → 201, `deployId`, `source` upload details |
+| POST | `/deploy/{deployId}/start` | Starts the uploaded source build; returns deployment state |
+| GET | `/deploy/{deployId}` | State, timestamps, `build`, last 40 `log` lines, `error`, `url`, artifact state |
+| GET | `/deploys` | `{deploys:[...],keep}`; entries include `active` and artifact state |
+| POST | `/deploy/{deployId}/activate` | Activate a retained successful static or server deployment without rebuilding |
+| GET | `/source` | Download metadata and signed `url` for the active deployment's uploaded source ZIP |
+| GET | `/deploy/{deployId}/source` | Download metadata and signed `url` for that retained source ZIP |
+
+ZIP the project contents with `package.json` at the top, including its lockfile. Exclude credentials,
+`.env*`, dependencies, build output and repository metadata. Use a clean source tree and review archive
+contents before uploading. Source is exactly what you upload; Cookiejar cannot remove a secret you include.
+
+```bash
+# Bash, from an already configured project; outputs only status and public URLs.
+set -e
+S=$(cat .sites/site)
+H=(-H "Authorization: Bearer $HUB_KEY" -H "X-Site: $S")
+D=$(curl --fail-with-body -sS -X POST "$HUB_URL/deploy" "${H[@]}" \
+  -H 'content-type: application/json' -d '{"kind":"server"}')
+DID=$(printf '%s' "$D" | node -pe 'JSON.parse(require("node:fs").readFileSync(0,"utf8")).deployId')
+UP=$(printf '%s' "$D" | node -pe 'JSON.parse(require("node:fs").readFileSync(0,"utf8")).source.uploadUrl')
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+zip -qr "$TMP/source.zip" . -x 'node_modules/*' '.next/*' '.open-next/*' '.git/*' '.sites/*' 'out/*' 'dist/*' '.env*' '*/.env*'
+curl --fail-with-body -sS -o /dev/null -X PUT "$UP" -H 'content-type: application/zip' --data-binary @"$TMP/source.zip"
+unset D UP
+curl --fail-with-body -sS -X POST "$HUB_URL/deploy/$DID/start" "${H[@]}" >/dev/null
+# Bounded polling. A timeout means inspect this same deployment, not blindly create another.
+for attempt in $(seq 1 120); do
+  R=$(curl --fail-with-body -sS "$HUB_URL/deploy/$DID" "${H[@]}")
+  STATUS=$(printf '%s' "$R" | node -pe 'JSON.parse(require("node:fs").readFileSync(0,"utf8")).status')
+  case "$STATUS" in
+    live|failed|superseded) break ;;
+  esac
+  sleep 15
+done
+printf '%s' "$R" | node -pe 'const d=JSON.parse(require("node:fs").readFileSync(0,"utf8")); JSON.stringify({status:d.status,url:d.url,error:d.error,log:d.log},null,2)'
+test "$STATUS" = live
+```
+
+Source upload and source download URLs expire after 900 seconds. Start before the source is uploaded
+returns 409. States are `created` → `starting` → `building` → `placing` → `live`, or terminal `failed`
+or `superseded`. Stop polling on **all three terminal states**. `superseded` means a later accepted
+start or activation controls publication; it is not a successful deployment. `live` is historical
+success; use `active` in `/deploys` or the site's `buildId` to find what serves now. Inspect the existing
+deployment after a network error before retrying a mutation. Repeated start for a non-created deploy
+returns its current state rather than starting a second build.
+
+A static build runs `npm ci` then `npm run build`. `outputDir` defaults to `out` and must be a relative
+folder without dot segments. Static artifacts require a root `index.html`, at most 50 MiB compressed,
+100 MiB extracted, 20 MiB per file and 5000 ZIP entries. Symlinks, traversal and duplicate paths are
+rejected. Releases are immutable and published as a whole; files use `max-age=0, must-revalidate`.
+Ship `404.html`; a missing path otherwise may return a bare 403. `/about` and `/about/` resolve to
+`/about/index.html`. Edge propagation still takes time after publication.
+
+A server build packages Next.js through OpenNext. Route handlers, server actions and server components
+run on the server. Use `images: { unoptimized: true }` in Next config; there is no image optimizer,
+shared cache, ISR or revalidation queue. Render dynamically or build static pages; do not depend on ISR.
+Build time varies; inspect state rather than assuming completion from elapsed time. Both kinds are
+hosted at `https://<siteId>.cookiejar.lol/`. Poll `GET /edge` for certificate readiness (`live: true`).
+
+### Versions, rollback and source recovery
+
+By default the five most recent successful versions retain artifacts; `/deploys.keep` is authoritative. The list returns up to 50 recent deployments, without pagination.
+The active version is protected from pruning. Artifact states are `retained`, `pruned` or `none`.
+Activate only a successfully published retained version. Static and server rollback both work;
+an old static deployment without a retained release must be rebuilt first (409).
+Pruned source or activation returns **410 Gone**, not a retryable build error. Source recovery for a
+manual file-only site returns 409; use `GET /files/site` instead. Download the ZIP from the returned
+signed URL, unpack into a clean directory and install dependencies to resume local work. A server
+rollback restores that version's deployment-time environment; current record/file/secret data is
+not rolled back. Edge propagation is asynchronous; verify the public URL after activation.
+
+## Environment variables (nonsecret)
+
+`GET /env` returns `{env, note}`. `PUT /env` takes the variable map directly and **replaces the entire
+map**, not a patch. Read it, merge desired changes locally, then PUT the full map. Omitted and null
+values are removed; `{}` clears it. Other values are converted to strings. Names match
+`[A-Z_][A-Z0-9_]*`. The size limit is **3500 bytes**, computed as the UTF-8 name and value bytes plus
+two bytes per entry. `HUB_URL`, `HUB_TOKEN`, `HUB_ORIGIN_SECRET`, `AWS_REGION` and `NODE_ENV` are reserved
+and rejected even if null. Variables apply to the server on its next deploy, not immediately and
+not as build-time variables. Values are readable as supplied; use `/secrets` for credentials.
+
+## Managed and sealed secrets
+
+| Method | Path | Meaning |
+|---|---|---|
+| PUT | `/secrets` | `{NAME:"value"}` sets managed values; `{NAME:{sealed:"ciphertext"}}` sets sealed values; null deletes |
+| GET | `/secrets` | `{secrets:[{name,sealed,version,createdAt,updatedAt}],note}`; no values |
+| GET | `/secrets/reveal` | `{values:{...},sealed:{...},note}`; optional comma-separated `names` filter |
+| DELETE | `/secrets/{NAME}` | `{name,deleted:true}`; 404 if absent |
+
+Managed values are encrypted with a site-and-name context and decrypted through the reveal endpoint.
+Use the running server's `HUB_TOKEN` to fetch them, for example `await hub.secrets(['PAYMENT_KEY'])`.
+Account keys and portal sessions receive **403** on reveal. The current authorization boundary is an
+**authenticated site token**: manually issued site tokens and retained deployment tokens also qualify.
+Do not treat this as protection against someone who controls site code or holds a site token.
+There is no customer account-key route that reads managed values back.
+
+Sealed values are ciphertext you encrypt outside Cookiejar with a key held outside Cookiejar;
+the service stores and returns that ciphertext unchanged and does not hold your decryption key.
+The same reveal authorization applies to sealed data. It is not an account-key-readable storage
+API for arbitrary external workers. A sealed value alone does not arrange key delivery or external
+worker access. Use an authenticated encryption format you can decrypt where the application runs.
+
+Names match `[A-Z_][A-Z0-9_]*`, at most 80 characters. Managed values must be nonempty UTF-8 strings
+up to **4096 bytes**. Sealed strings must be nonempty base64/base64url characters up to **16384
+characters**. A site holds at most **100 secrets**. Empty PUT maps are rejected. PUT updates only
+specified names (unlike `/env`); replacing a name increments its version. Multi-name writes execute
+in order and are not atomic: an error can leave earlier entries applied. List metadata to reconcile.
+A server already running can read a new value without a redeploy; refresh any in-memory cache when
+rotating. Do not log values or write them to files/browser responses. Fetch only needed names and
+keep them in memory. `secret.put`, `secret.delete` and `secret.reveal` events contain names/metadata,
+never values. The change log is best effort, not an independently guaranteed audit ledger.
+If the store is unavailable/unconfigured, writes may return 503; do not fall back to plaintext env.
+
+## Password protection
+
+`PUT /password {"password":"your chosen password"}` protects all the site's hosts. Passwords must
+be 1–200 characters with no newline. `DELETE /password` removes protection. Responses include
+`passwordProtected` and `published`; allow about a minute for edge propagation. Visitors see one
+password field and their browser remembers access for 30 days. Tools may send HTTP Basic with any
+username and that password to the **hosted site**. This does not replace the bearer token for the
+Cookiejar API, or your application's own per-user authorization. Verify every host after changing it.
+
+## Edge and custom domains
+
+| Method | Path | Request and result |
+|---|---|---|
+| POST | `/edge` | Attach the default host, idempotently; optional `{domains:[...]}` for already configured hosts |
+| GET | `/edge` | Edge/certificate state, domains and `live` |
+| POST | `/edge/invalidate` | 202, flush hosted-site cache after a manual site-tier publish |
+| POST | `/edge/domains` | `{domain:"www.example.com"}` → 202 with `domain` state and DNS instructions |
+| GET | `/edge/domains` | `{default,domains:[...]}` with `dns`, `tenant`, `gateway`, `live`, `error`, `manual` |
+| DELETE | `/edge/domains/{host}` | Remove attachment and managed DNS; `{removed,dnsKept}` |
+| POST | `/edge/domains/{host}/move` | `{to:"targetSiteId"}` → 202; move between sites owned by the same account |
+
+Custom domains work for **both static and Next.js server sites**. Add a hostname you own (no scheme
+or path), then inspect the returned `domain.manual` array. Cookiejar writes DNS automatically when
+the zone is in its connected registrar account; otherwise create the listed records at your DNS
+provider. Poll `/edge/domains`: a server site may also need a certificate-validation CNAME, so check
+updated `manual` instructions while it progresses. `live: true` means attachment is ready; `error`
+and `nextTryAt` explain pending work. Do not equate a 202 response with live traffic.
+
+Apex domains need ALIAS/flattening support; managed registrar zones support ALIAS. One hostname belongs
+to one site. A duplicate attachment on another site returns 409; use the explicit move operation on
+the source, then poll the target until live. Names under `cookiejar.lol` are assigned by Cookiejar
+and cannot be added as custom domains. There is currently no customer domain-search or domain-purchase
+endpoint. Register a desired domain through your registrar, then attach it here.
+
+For a manually published static site with no managed release, upload web-root files to the `site`
+tier, call `POST /edge`, wait for `live`, then `POST /edge/invalidate`. Managed deployments invalidate
+their own hosted-site cache. This operation does not flush the separate public-files CDN.
+
+## Change feed and ongoing operation
+
+`GET /changes?since=<cursor>&limit=100` returns `{changes,cursor,more,note}`. Each event has `id`,
+`at`, `type` and details. The default limit is 100, max 200. Without `since` it returns the most recent
+window in chronological order; it is not a full-history export. With `since`, results are oldest
+first after that cursor. Save the cursor; continue with it while `more` is true, and on later wakes.
+An empty response preserves the cursor (or null for a new empty feed).
+
+Events include record put/delete, collection delete, file put/delete, deployment live/failed/activated,
+domain live/moved, env changes, rename and secret put/delete/reveal. `file.put` records minting an upload
+URL, not proof that bytes arrived; check file info after upload. Logging is best effort. Password,
+site rotation/disable and every intermediate deployment state are not covered; use the corresponding
+status routes. Use the feed to pick up new leads and changes when asked or when your agent wakes.
+
+## Errors and recovery
+
+API errors are JSON `{error:"message"}` and may include additional fields. Preserve the HTTP status
+and useful error text; redact bearer tokens, signed URLs, secret values and user data from reports.
+Storage uploads and hosted sites may return non-JSON errors, so check their HTTP status too.
+
+| Status | Meaning and action |
+|---|---|
+| 400 | Invalid JSON, name, path, cursor or parameters; correct the request |
+| 401 | Missing/invalid/expired credentials; check the environment or renew the portal session |
+| 403 | Disabled account/site or an operation forbidden for this credential, including key/session secret reveal |
+| 404 | Missing route, record, file, deployment or owned site; verify identifiers |
+| 405 | Unsupported method; use the method in this manual |
+| 409 | Conflict: missing source, competing operation, managed static-file write, domain already owned, or ineligible activation; resolve the stated cause |
+| 410 | Source/artifacts gone or pruned; choose a retained deployment or rebuild from local source |
+| 413 | Record, environment or secret limit exceeded; reduce the payload or use files |
+| 429 | Waitlist rate limit or platform throttling; wait the stated interval and honor Retry-After if provided |
+| 500 / 503 | Internal error/unavailable service; inspect current state and retry reads with bounded backoff, report persistent errors |
+
+Do not blindly retry unchanged 4xx requests. For a transient conflict, reconcile state before a
+bounded retry. A lost mutation response does not prove failure; for generated-record creation,
+site creation or deployment creation, inspect existing results before creating duplicates.
+On problems, report the method, redacted path, status and error to the human/Cookiejar contact.
 
 ## The client (copy this file, no dependency)
 
-`lib/hub.ts`:
+`lib/hub.ts` (import only from server code; keep this module out of client components):
 
 ```ts
-// The hub client. Server-side only: it reads HUB_TOKEN.
-const URL = process.env.HUB_URL!;
-const TOKEN = process.env.HUB_TOKEN!;
+// Server-side only. In production Cookiejar supplies HUB_TOKEN.
+// Locally use your own process environment, never a project .env file.
+const URL = process.env.HUB_URL?.replace(/\/$/, '')!;
+const TOKEN = process.env.HUB_TOKEN || process.env.HUB_KEY;
+const SITE = process.env.HUB_TOKEN ? undefined : process.env.HUB_SITE;
+if (!URL || !TOKEN || (!process.env.HUB_TOKEN && !SITE)) {
+  throw new Error('Set HUB_URL plus HUB_TOKEN, or HUB_KEY and HUB_SITE for local development.');
+}
 
 export class HubError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -195,7 +452,7 @@ async function call<T>(method: string, path: string, body?: unknown, query?: Rec
     : '';
   const res = await fetch(`${URL}${path}${qs}`, {
     method,
-    headers: { authorization: `Bearer ${TOKEN}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+    headers: { authorization: `Bearer ${TOKEN}`, ...(SITE ? { 'X-Site': SITE } : {}), ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     cache: 'no-store',
   });
@@ -236,7 +493,7 @@ export const hub = {
   collections: () => call<{ collections: { collection: string; updatedAt: string }[] }>('GET', '/c'),
 
   // ---- files ------------------------------------------------------------------
-  /** Presigned PUT. Send the bytes to uploadUrl with exactly `headers`. Public files are live at `url`. */
+  /** Presigned PUT. Send the bytes to uploadUrl with exactly `headers`. Public files become live at `url` after the PUT succeeds. */
   uploadUrl: (access: 'public' | 'private', path: string, contentType: string, cacheControl?: string) =>
     call<{ uploadUrl: string; headers: Record<string, string>; url: string | null; path: string; expiresIn: number }>(
       'POST', `/files/${access}`, { path, contentType, cacheControl }),
@@ -265,7 +522,6 @@ export const hub = {
 
 ```ts
 'use server';
-import { revalidatePath } from 'next/cache';
 import { hub } from '@/lib/hub';
 
 // Used directly as <form action={submitSignup}>, so it returns void (React 19
@@ -274,7 +530,6 @@ export async function submitSignup(formData: FormData): Promise<void> {
   const email = String(formData.get('email') ?? '').trim();
   if (!email) return;
   await hub.create('signups', { email, at: new Date().toISOString() });
-  revalidatePath('/'); // the page that lists signups
 }
 ```
 
@@ -308,16 +563,23 @@ Route handler mints the url; the browser PUTs the file to it.
 // app/api/upload/route.ts
 import { hub } from '@/lib/hub';
 export async function POST(req: Request) {
+  // Authenticate and authorize the visitor before minting an upload URL.
   const { name, type } = await req.json();
-  const safe = name.replace(/[^A-Za-z0-9._-]/g, '_');
+  if (typeof name !== 'string' || typeof type !== 'string') {
+    return Response.json({ error: 'name and type are required' }, { status: 400 });
+  }
+  const safe = name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 160) || 'file';
   return Response.json(await hub.uploadUrl('public', `uploads/${Date.now()}-${safe}`, type));
 }
 ```
 
 ```ts
 // client
-const meta = await fetch('/api/upload', { method: 'POST', body: JSON.stringify({ name: file.name, type: file.type }) }).then((r) => r.json());
-await fetch(meta.uploadUrl, { method: 'PUT', headers: meta.headers, body: file });
+const signed = await fetch('/api/upload', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: file.name, type: file.type }) });
+if (!signed.ok) throw new Error(`Upload authorization failed: ${signed.status}`);
+const meta = await signed.json();
+const uploaded = await fetch(meta.uploadUrl, { method: 'PUT', headers: meta.headers, body: file });
+if (!uploaded.ok) throw new Error(`Upload failed: ${uploaded.status}`);
 // meta.url is the public CDN url; save it in a record if the page needs it later
 ```
 
@@ -339,18 +601,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 }
 ```
 
-## Rules
+## Working rules
 
-- **Nothing secret in page code.** You act with your key + `X-Site`; the deployed server gets its own `HUB_TOKEN` from sites. Only server code (route handlers, server actions, server components) calls sites.
-- **Keys are identifiers**, not sentences: `[A-Za-z0-9_.:@~-]`, ≤ 256 chars. Slugify user input before using it as a key; or use `create()` and let the hub generate one.
-- **Prefix keys to query by group**: `2026-09-21:...` keys list by day with `prefix: '2026-09-21'`; `user:<id>:...` lists one user's rows.
-- **One record ≤ 350 KB.** Larger content is a file; store its url in the record.
-- **Public file urls are cached 5 minutes** at the edge. Immutable assets: upload with `cacheControl: 'public, max-age=31536000, immutable'` and a content-hashed path.
-- **Private urls expire in one hour.** Never store one; store the path and fetch a fresh url on each request.
-- **Errors** are `{error}` with a real status: 400 bad input, 401 bad token, 403 site disabled, 404 missing, 413 too big. Surface the message; do not retry 4xx.
-- **Do not install** `@vercel/blob`, `@vercel/postgres`, `@neondatabase/serverless`, `@supabase/*`, `@upstash/redis`, `@prisma/client` or `drizzle-orm`, and do not deploy to Vercel, Netlify or any other host, for a sites project. If a requirement truly needs them (joins, search, transactions), say so and ask first.
-- **A leaked key** (`HUB_KEY`): stop and tell the human at once; only the admin can replace it. Site tokens are minted per deploy and never leave the server; redeploying rotates them.
-
-## Reference
-
-`GET $HUB_URL/` returns the full route list. Full contract: https://cookiejar.lol/contract/README.md
+- Keep all Cookiejar credentials in agent/server environments; never ship them to a browser.
+- Preserve each project's `.sites/site`; do not create duplicate sites for a resumed project.
+- Use the actual limits, states and permissions above; never promise a planned endpoint.
+- Prefer records and files over adding a new infrastructure dependency. Explain requirements that exceed this API.
+- Verify a deployment, domain, upload or rollback before telling the human it is complete.
