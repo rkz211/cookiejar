@@ -51,7 +51,7 @@ retrieval:
 # Cookiejar: complete customer-agent manual
 
 Cookiejar (“sites”) hosts the projects you build and gives each one JSON records, file storage,
-deployments, custom domains and secrets. One account key per person, one site per project.
+deployments, custom domains and secured env variables. One account key per person, one site per project.
 The canonical manual is [cookiejar.lol/agent/](https://cookiejar.lol/agent/).
 The installable [sites skill](https://raw.githubusercontent.com/rkz211/cookiejar/main/skills/sites/SKILL.md)
 is generated from this same manual. You do not need a second reference to build or operate a site.
@@ -92,8 +92,8 @@ test -n "$HUB_URL" && test -n "$HUB_KEY" && echo 'Environment ready'
 Cookiejar supplies `HUB_URL` and a per-deployment `HUB_TOKEN` to the deployed server automatically.
 `.sites/site` holds only a site id and may be committed. For local server development, set
 `HUB_SITE=$(cat .sites/site)` in your process environment alongside your key; the client below
-uses `HUB_KEY` plus `X-Site` locally. Secret reveal requires a site token and therefore does not
-work with that local account-key mode.
+uses `HUB_KEY` plus `X-Site` locally. Reading secured env variables back (`GET /env/secured/reveal`) takes
+a site token, so run that part with the site's `HUB_TOKEN` rather than the account key.
 
 ## Step 3 — Install once
 
@@ -117,8 +117,8 @@ An already installed agent should proceed to the requested project rather than r
 | Images, PDFs, downloads a page links to | Public files, stable CDN URLs |
 | Reports, invoices, private attachments | Private files, fresh signed download per read |
 | Next.js server code or a static build | Cookiejar hosting |
-| API credentials used by server code | Managed secrets |
-| Ciphertext encrypted with a key you hold outside Cookiejar | Sealed secrets |
+| Server settings and API keys, kept encrypted | Secured env variables (`/env/secured`) |
+| Ciphertext encrypted with a key you hold outside Cookiejar | Sealed secured env variables (`/env/secured`) |
 
 Records are a simple table API. There are no relational joins, full-text search or multi-record
 transactions. If those are essential, explain the requirement and ask before introducing another
@@ -309,7 +309,7 @@ signed URL, unpack into a clean directory and install dependencies to resume loc
 rollback restores that version's deployment-time environment; current record/file/secret data is
 not rolled back. Edge propagation is asynchronous; verify the public URL after activation.
 
-## Environment variables (nonsecret)
+## Environment variables (`/env`)
 
 `GET /env` returns `{env, note}`. `PUT /env` takes the variable map directly and **replaces the entire
 map**, not a patch. Read it, merge desired changes locally, then PUT the full map. Omitted and null
@@ -317,40 +317,36 @@ values are removed; `{}` clears it. Other values are converted to strings. Names
 `[A-Z_][A-Z0-9_]*`. The size limit is **3500 bytes**, computed as the UTF-8 name and value bytes plus
 two bytes per entry. `HUB_URL`, `HUB_TOKEN`, `HUB_ORIGIN_SECRET`, `AWS_REGION` and `NODE_ENV` are reserved
 and rejected even if null. Variables apply to the server on its next deploy, not immediately and
-not as build-time variables. Values are readable as supplied; use `/secrets` for credentials.
+not as build-time variables. Values are readable as supplied. For values kept encrypted, use secured env variables (`/env/secured`).
 
-## Managed and sealed secrets
+## Secured env variables (`/env/secured`)
+
+Secured env variables are environment values a site's server reads at runtime, kept encrypted
+because they could be anything: settings, API keys, tokens. Add them through the API below, or by
+hand in the portal: open the site, **env** tab, **Secured** section. Both write the same store.
+Unlike plain `/env` variables, they need no redeploy. `/secrets` is the older path to the same
+store and still works.
 
 | Method | Path | Meaning |
 |---|---|---|
-| PUT | `/secrets` | `{NAME:"value"}` sets managed values; `{NAME:{sealed:"ciphertext"}}` sets sealed values; null deletes |
-| GET | `/secrets` | `{secrets:[{name,sealed,version,createdAt,updatedAt}],note}`; no values |
-| GET | `/secrets/reveal` | `{values:{...},sealed:{...},note}`; optional comma-separated `names` filter |
-| DELETE | `/secrets/{NAME}` | `{name,deleted:true}`; 404 if absent |
+| PUT | `/env/secured` | `{NAME:"value"}` stores values; `{NAME:{sealed:"ciphertext"}}` stores sealed values; null deletes |
+| GET | `/env/secured` | `{secrets:[{name,sealed,version,createdAt,updatedAt}],note}`; names and versions |
+| GET | `/env/secured/reveal` | `{values:{...},sealed:{...},note}`; optional comma-separated `names` |
+| DELETE | `/env/secured/{NAME}` | `{name,deleted:true}`; 404 if absent |
 
-Managed values are encrypted with a site-and-name context and decrypted through the reveal endpoint.
-Use the running server's `HUB_TOKEN` to fetch them, for example `await hub.secrets(['PAYMENT_KEY'])`.
-Account keys and portal sessions receive **403** on reveal. The current authorization boundary is an
-**authenticated site token**: manually issued site tokens and retained deployment tokens also qualify.
-Do not treat this as protection against someone who controls site code or holds a site token.
-There is no customer account-key route that reads managed values back.
+Values are encrypted per site and name. The site's server reads them with its `HUB_TOKEN`, for
+example `await hub.secured(['PAYMENT_KEY'])`; manually issued site tokens and retained deployment
+tokens read them too. Account keys and portal sessions write and list them, and get **403** on reveal.
 
-Sealed values are ciphertext you encrypt outside Cookiejar with a key held outside Cookiejar;
-the service stores and returns that ciphertext unchanged and does not hold your decryption key.
-The same reveal authorization applies to sealed data. It is not an account-key-readable storage
-API for arbitrary external workers. A sealed value alone does not arrange key delivery or external
-worker access. Use an authenticated encryption format you can decrypt where the application runs.
+Sealed values are ciphertext you encrypt with a key you hold; Cookiejar stores and returns it
+unchanged, and your application decrypts it where it runs.
 
-Names match `[A-Z_][A-Z0-9_]*`, at most 80 characters. Managed values must be nonempty UTF-8 strings
-up to **4096 bytes**. Sealed strings must be nonempty base64/base64url characters up to **16384
-characters**. A site holds at most **100 secrets**. Empty PUT maps are rejected. PUT updates only
-specified names (unlike `/env`); replacing a name increments its version. Multi-name writes execute
-in order and are not atomic: an error can leave earlier entries applied. List metadata to reconcile.
-A server already running can read a new value without a redeploy; refresh any in-memory cache when
-rotating. Do not log values or write them to files/browser responses. Fetch only needed names and
-keep them in memory. `secret.put`, `secret.delete` and `secret.reveal` events contain names/metadata,
-never values. The change log is best effort, not an independently guaranteed audit ledger.
-If the store is unavailable/unconfigured, writes may return 503; do not fall back to plaintext env.
+Names match `[A-Z_][A-Z0-9_]*`, at most 80 characters. Values are nonempty UTF-8 strings up to
+**4096 bytes**; sealed strings are base64/base64url up to **16384 characters**. A site holds up to
+**100 secured variables**. PUT updates only the names given (unlike `/env`), in order; replacing a name increments its
+version. A running server sees a new value on its next read, with no redeploy. `secret.put`,
+`secret.delete` and `secret.reveal` events in the change feed carry names, not values. A 503 means
+the store is unavailable; try again.
 
 ## Password protection
 
@@ -407,14 +403,14 @@ status routes. Use the feed to pick up new leads and changes when asked or when 
 ## Errors and recovery
 
 API errors are JSON `{error:"message"}` and may include additional fields. Preserve the HTTP status
-and useful error text; redact bearer tokens, signed URLs, secret values and user data from reports.
+and useful error text; leave bearer tokens, signed URLs, secured variable values and user data out of reports.
 Storage uploads and hosted sites may return non-JSON errors, so check their HTTP status too.
 
 | Status | Meaning and action |
 |---|---|
 | 400 | Invalid JSON, name, path, cursor or parameters; correct the request |
 | 401 | Missing/invalid/expired credentials; check the environment or renew the portal session |
-| 403 | Disabled account/site or an operation forbidden for this credential, including key/session secret reveal |
+| 403 | Disabled account/site, or an operation this credential does not do (for example reveal with an account key: use the site token) |
 | 404 | Missing route, record, file, deployment or owned site; verify identifiers |
 | 405 | Unsupported method; use the method in this manual |
 | 409 | Conflict: missing source, competing operation, managed static-file write, domain already owned, or ineligible activation; resolve the stated cause |
@@ -471,8 +467,8 @@ const enc = encodeURIComponent;
 export const hub = {
   /** Which site this token is: {siteId, name, calls, publicFilesUrl}. */
   me: () => call<{ siteId: string; name: string; calls: number; publicFilesUrl: string }>('GET', '/me'),
-  /** The site's secrets (managed values decrypted; sealed ones as stored). Server-side only; call once at startup, keep in memory. */
-  secrets: (names?: string[]) => call<{ values: Record<string, string>; sealed: Record<string, string> }>('GET', '/secrets/reveal', undefined, { names: names?.join(',') }),
+  /** The site's secured env variables (values decrypted; sealed ones as stored). Server-side only; call once at startup, keep in memory. */
+  secured: (names?: string[]) => call<{ values: Record<string, string>; sealed: Record<string, string> }>('GET', '/env/secured/reveal', undefined, { names: names?.join(',') }),
 
   // ---- records --------------------------------------------------------------
   get: <T = unknown>(collection: string, key: string) =>
@@ -611,6 +607,8 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 
 ## If you are a dot
 
-Also follow https://www.cookiejar.lol/for/dot.html. It covers the dot API bridge you reach Cookiejar through.
+Also follow https://www.cookiejar.lol/for/dot.html. It covers the dot bridge you reach Cookiejar through.
 
-Current dot API bridge: **version 0.4.0** (commit `da5c6e7`, 2026-10-23), source at https://github.com/rkz211/dot-api-bridge. Your deployed bridge reports its version as `serverInfo.version` in its MCP `initialize` response. If that is lower than 0.4.0, update it: pull the source, run `npm test`, `npm run check` and `npm run build`, and redeploy to the same private Site as the bridge's SETUP.md section "Update an existing bridge" describes.
+Current dot bridge: **version 0.5.0** (2026-10-23), source at https://github.com/rkz211/dot-bridge. Your deployed bridge reports its version as `serverInfo.version` in its MCP `initialize` response. If it is lower than 0.5.0, or it is the older `dot-api-bridge`, update it: clone https://github.com/rkz211/dot-bridge.git, run `npm test`, `npm run check` and `npm run build`, and redeploy to the same private Site (its SETUP.md, "Update an existing bridge"). Saved services carry over.
+
+The bridge passes every Cookiejar route in this manual through as written: send them with `bridge_api_read` and `bridge_api_write`, `serviceId: "cookiejar"` and your `siteId`.
