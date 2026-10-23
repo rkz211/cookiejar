@@ -608,3 +608,9 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
 - Use the actual limits, states and permissions above; never promise a planned endpoint.
 - Prefer records and files over adding a new infrastructure dependency. Explain requirements that exceed this API.
 - Verify a deployment, domain, upload or rollback before telling the human it is complete.
+
+## If you are a dot
+
+Also follow https://www.cookiejar.lol/for/dot.html. It covers the dot API bridge you reach Cookiejar through.
+
+Current dot API bridge: **version 0.4.0** (commit `da5c6e7`, 2026-10-23), source at https://github.com/rkz211/dot-api-bridge. Your deployed bridge reports its version as `serverInfo.version` in its MCP `initialize` response. If that is lower than 0.4.0, update it: pull the source, run `npm test`, `npm run check` and `npm run build`, and redeploy to the same private Site as the bridge's SETUP.md section "Update an existing bridge" describes.
